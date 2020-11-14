@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2013-2019 Nikita Koksharov
+ * Copyright (c) 2013-2020 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,32 +15,15 @@
  */
 package org.redisson.cache;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
-
-import org.redisson.RedissonListMultimapCache;
-import org.redisson.RedissonObject;
-import org.redisson.RedissonScoredSortedSet;
-import org.redisson.RedissonSemaphore;
-import org.redisson.RedissonTopic;
-import org.redisson.api.LocalCachedMapOptions;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufUtil;
+import io.netty.buffer.Unpooled;
+import org.redisson.*;
+import org.redisson.api.*;
 import org.redisson.api.LocalCachedMapOptions.EvictionPolicy;
 import org.redisson.api.LocalCachedMapOptions.ReconnectionStrategy;
 import org.redisson.api.LocalCachedMapOptions.SyncStrategy;
-import org.redisson.api.RFuture;
-import org.redisson.api.RListMultimapCache;
-import org.redisson.api.RObject;
-import org.redisson.api.RScoredSortedSet;
-import org.redisson.api.RSemaphore;
-import org.redisson.api.RTopic;
 import org.redisson.api.listener.BaseStatusListener;
 import org.redisson.api.listener.MessageListener;
 import org.redisson.client.codec.ByteArrayCodec;
@@ -51,9 +34,12 @@ import org.redisson.misc.RedissonPromise;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufUtil;
-import io.netty.buffer.Unpooled;
+import java.io.IOException;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 
@@ -72,7 +58,7 @@ public abstract class LocalCacheListener {
     
     private String name;
     private CommandAsyncExecutor commandExecutor;
-    private Cache<?, ?> cache;
+    private Map<?, ?> cache;
     private RObject object;
     private byte[] instanceId = new byte[16];
     private Codec codec;
@@ -107,15 +93,35 @@ public abstract class LocalCacheListener {
         return instanceId;
     }
     
-    public Cache<CacheKey, CacheValue> createCache(LocalCachedMapOptions<?, ?> options) {
+    public ConcurrentMap<CacheKey, CacheValue> createCache(LocalCachedMapOptions<?, ?> options) {
+        if (options.getCacheProvider() == LocalCachedMapOptions.CacheProvider.CAFFEINE) {
+            Caffeine<Object, Object> caffeineBuilder = Caffeine.newBuilder();
+            if (options.getTimeToLiveInMillis() > 0) {
+                caffeineBuilder.expireAfterWrite(options.getTimeToLiveInMillis(), TimeUnit.MILLISECONDS);
+            }
+            if (options.getMaxIdleInMillis() > 0) {
+                caffeineBuilder.expireAfterAccess(options.getMaxIdleInMillis(), TimeUnit.MILLISECONDS);
+            }
+            if (options.getCacheSize() > 0) {
+                caffeineBuilder.maximumSize(options.getCacheSize());
+            }
+            if (options.getEvictionPolicy() == LocalCachedMapOptions.EvictionPolicy.SOFT) {
+                caffeineBuilder.softValues();
+            }
+            if (options.getEvictionPolicy() == LocalCachedMapOptions.EvictionPolicy.WEAK) {
+                caffeineBuilder.weakValues();
+            }
+            return caffeineBuilder.<CacheKey, CacheValue>build().asMap();
+        }
+
         if (options.getEvictionPolicy() == EvictionPolicy.NONE) {
-            return new NoneCacheMap<CacheKey, CacheValue>(options.getTimeToLiveInMillis(), options.getMaxIdleInMillis());
+            return new NoneCacheMap<>(options.getTimeToLiveInMillis(), options.getMaxIdleInMillis());
         }
         if (options.getEvictionPolicy() == EvictionPolicy.LRU) {
-            return new LRUCacheMap<CacheKey, CacheValue>(options.getCacheSize(), options.getTimeToLiveInMillis(), options.getMaxIdleInMillis());
+            return new LRUCacheMap<>(options.getCacheSize(), options.getTimeToLiveInMillis(), options.getMaxIdleInMillis());
         }
         if (options.getEvictionPolicy() == EvictionPolicy.LFU) {
-            return new LFUCacheMap<CacheKey, CacheValue>(options.getCacheSize(), options.getTimeToLiveInMillis(), options.getMaxIdleInMillis());
+            return new LFUCacheMap<>(options.getCacheSize(), options.getTimeToLiveInMillis(), options.getMaxIdleInMillis());
         }
         if (options.getEvictionPolicy() == EvictionPolicy.SOFT) {
             return ReferenceCacheMap.soft(options.getTimeToLiveInMillis(), options.getMaxIdleInMillis());
@@ -130,7 +136,7 @@ public abstract class LocalCacheListener {
         return disabledKeys.containsKey(key);
     }
     
-    public void add(Cache<?, ?> cache) {
+    public void add(Map<?, ?> cache) {
         this.cache = cache;
         
         invalidationTopic = new RedissonTopic(LocalCachedMessageCodec.INSTANCE, commandExecutor, getInvalidationTopicName());
@@ -184,8 +190,10 @@ public abstract class LocalCacheListener {
                         LocalCachedMapClear clearMsg = (LocalCachedMapClear) msg;
                         cache.clear();
 
-                        RSemaphore semaphore = getClearSemaphore(clearMsg.getRequestId());
-                        semaphore.releaseAsync();
+                        if (clearMsg.isReleaseSemaphore()) {
+                            RSemaphore semaphore = getClearSemaphore(clearMsg.getRequestId());
+                            semaphore.releaseAsync();
+                        }
                     }
                     
                     if (msg instanceof LocalCachedMapInvalidate) {
@@ -241,7 +249,7 @@ public abstract class LocalCacheListener {
     public RFuture<Void> clearLocalCacheAsync() {
         RPromise<Void> result = new RedissonPromise<Void>();
         byte[] id = generateId();
-        RFuture<Long> future = invalidationTopic.publishAsync(new LocalCachedMapClear(id));
+        RFuture<Long> future = invalidationTopic.publishAsync(new LocalCachedMapClear(id, true));
         future.onComplete((res, e) -> {
             if (e != null) {
                 result.tryFailure(e);
@@ -249,17 +257,28 @@ public abstract class LocalCacheListener {
             }
 
             RSemaphore semaphore = getClearSemaphore(id);
-            semaphore.acquireAsync(res.intValue()).onComplete((r, ex) -> {
+            semaphore.tryAcquireAsync(res.intValue(), 50, TimeUnit.SECONDS).onComplete((r, ex) -> {
                 if (ex != null) {
                     result.tryFailure(ex);
                     return;
                 }
                 
-                result.trySuccess(null);
+                semaphore.deleteAsync().onComplete((re, exc) -> {
+                    if (exc != null) {
+                        result.tryFailure(exc);
+                        return;
+                    }
+
+                    result.trySuccess(null);
+                });
             });
         });
         
         return result;
+    }
+
+    public RTopic getInvalidationTopic() {
+        return invalidationTopic;
     }
 
     public String getInvalidationTopicName() {
@@ -333,7 +352,7 @@ public abstract class LocalCacheListener {
         });
     }
 
-    protected RSemaphore getClearSemaphore(byte[] requestId) {
+    private RSemaphore getClearSemaphore(byte[] requestId) {
         String id = ByteBufUtil.hexDump(requestId);
         RSemaphore semaphore = new RedissonSemaphore(commandExecutor, name + ":clear:" + id);
         return semaphore;

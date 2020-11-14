@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2013-2019 Nikita Koksharov
+ * Copyright (c) 2013-2020 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package org.redisson.api;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -96,18 +97,18 @@ public interface RScoredSortedSetReactive<V> extends RExpirableReactive, RSortab
     Mono<V> pollLast(long timeout, TimeUnit unit);
     
     /**
-     * Removes and returns the head elements or {@code null} if this sorted set is empty.
+     * Removes and returns the head elements of this sorted set.
      *
      * @param count - elements amount
-     * @return the head elements
+     * @return the head elements of this sorted set
      */
     Mono<Collection<V>> pollFirst(int count);
 
     /**
-     * Removes and returns the tail elements or {@code null} if this sorted set is empty.
+     * Removes and returns the tail elements of this sorted set.
      *
      * @param count - elements amount
-     * @return the tail elements
+     * @return the tail elements of this sorted set
      */
     Mono<Collection<V>> pollLast(int count);
 
@@ -228,12 +229,28 @@ public interface RScoredSortedSetReactive<V> extends RExpirableReactive, RSortab
     Mono<Integer> revRank(V o);
 
     /**
+     * Returns ranks of elements, with the scores ordered from high to low.
+     *
+     * @param elements - elements
+     * @return ranks or <code>null</code> if value does not exist
+     */
+    Mono<List<Integer>> revRank(Collection<V> elements);
+
+    /**
      * Returns score of element or <code>null</code> if it doesn't exist.
      * 
      * @param o - element
      * @return score
      */
     Mono<Double> getScore(V o);
+
+    /**
+     * Returns scores of elements.
+     *
+     * @param elements - elements
+     * @return element scores
+     */
+    Mono<List<Double>> getScore(Collection<V> elements);
 
     /**
      * Adds element to this set, overrides previous score if it has been already added.
@@ -272,7 +289,15 @@ public interface RScoredSortedSetReactive<V> extends RExpirableReactive, RSortab
      * @return reverse rank
      */
     Mono<Integer> addAndGetRevRank(double score, V object);
-    
+
+    /**
+     * Adds elements to this set, overrides previous score if it has been already added.
+     * Finally returns reverse rank list of the items
+     * @param map - map of object and scores, make sure to use an ordered map
+     * @return collection of reverse ranks
+     */
+    Mono<List<Integer>> addAndGetRevRank(Map<? extends V, Double> map);
+
     /**
      * Adds element to this set only if has not been added before.
      * <p>

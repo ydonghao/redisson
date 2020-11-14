@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2013-2019 Nikita Koksharov
+ * Copyright (c) 2013-2020 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -226,7 +226,8 @@ public class RedissonListMultimap<K, V> extends RedissonMultimap<K, V> implement
             @Override
             public RFuture<Boolean> deleteAsync() {
                 ByteBuf keyState = encodeMapKey(key);
-                return RedissonListMultimap.this.fastRemoveAsync(Arrays.<Object>asList(keyState), Arrays.<Object>asList(setName), RedisCommands.EVAL_BOOLEAN_AMOUNT);
+                return RedissonListMultimap.this.fastRemoveAsync(Arrays.asList(keyState),
+                        Arrays.asList(RedissonListMultimap.this.getName(), setName), RedisCommands.EVAL_BOOLEAN_AMOUNT);
             }
             
             @Override

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2013-2019 Nikita Koksharov
+ * Copyright (c) 2013-2020 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,10 +15,7 @@
  */
 package org.redisson.pubsub;
 
-import java.util.Collection;
-import java.util.Collections;
-import java.util.EventListener;
-import java.util.Queue;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
@@ -49,26 +46,24 @@ public class PubSubConnectionEntry {
     private final ConcurrentMap<ChannelName, SubscribeListener> subscribeChannelListeners = new ConcurrentHashMap<ChannelName, SubscribeListener>();
     private final ConcurrentMap<ChannelName, Queue<RedisPubSubListener<?>>> channelListeners = new ConcurrentHashMap<ChannelName, Queue<RedisPubSubListener<?>>>();
 
+    private static final Queue<RedisPubSubListener<?>> EMPTY_QUEUE = new LinkedList<>();
+
     public PubSubConnectionEntry(RedisPubSubConnection conn, int subscriptionsPerConnection) {
         super();
         this.conn = conn;
         this.subscribedChannelsAmount = new AtomicInteger(subscriptionsPerConnection);
     }
 
-    public int countListeners() {
-        return channelListeners.size();
+    public int countListeners(ChannelName channelName) {
+        return channelListeners.getOrDefault(channelName, EMPTY_QUEUE).size();
     }
     
     public boolean hasListeners(ChannelName channelName) {
         return channelListeners.containsKey(channelName);
     }
 
-    public Collection<RedisPubSubListener<?>> getListeners(ChannelName channelName) {
-        Collection<RedisPubSubListener<?>> result = channelListeners.get(channelName);
-        if (result == null) {
-            return Collections.emptyList();
-        }
-        return result;
+    public Queue<RedisPubSubListener<?>> getListeners(ChannelName channelName) {
+        return channelListeners.getOrDefault(channelName, EMPTY_QUEUE);
     }
 
     public void addListener(ChannelName channelName, RedisPubSubListener<?> listener) {
@@ -101,14 +96,6 @@ public class PubSubConnectionEntry {
         conn.addListener(listener);
     }
 
-    public boolean removeAllListeners(ChannelName channelName) {
-        Queue<RedisPubSubListener<?>> listeners = channelListeners.get(channelName);
-        for (RedisPubSubListener<?> listener : listeners) {
-            removeListener(channelName, listener);
-        }
-        return listeners.isEmpty();
-    }
-    
     // TODO optimize
     public boolean removeListener(ChannelName channelName, EventListener msgListener) {
         Queue<RedisPubSubListener<?>> listeners = channelListeners.get(channelName);
@@ -189,7 +176,7 @@ public class PubSubConnectionEntry {
         return listener;
     }
     
-    public ChannelFuture unsubscribe(final ChannelName channel, final RedisPubSubListener<?> listener) {
+    public ChannelFuture unsubscribe(ChannelName channel, RedisPubSubListener<?> listener) {
         conn.addListener(new BaseRedisPubSubListener() {
             @Override
             public boolean onStatus(PubSubType type, CharSequence ch) {
@@ -245,4 +232,9 @@ public class PubSubConnectionEntry {
         return conn;
     }
 
+    @Override
+    public String toString() {
+        return "PubSubConnectionEntry [subscribedChannelsAmount=" + subscribedChannelsAmount + ", conn=" + conn + "]";
+    }
+    
 }

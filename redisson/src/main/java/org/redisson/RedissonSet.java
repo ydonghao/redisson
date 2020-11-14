@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2013-2019 Nikita Koksharov
+ * Copyright (c) 2013-2020 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,6 +39,7 @@ import org.redisson.client.codec.Codec;
 import org.redisson.client.protocol.RedisCommands;
 import org.redisson.client.protocol.decoder.ListScanResult;
 import org.redisson.command.CommandAsyncExecutor;
+import org.redisson.iterator.RedissonBaseIterator;
 import org.redisson.mapreduce.RedissonCollectionMapReduce;
 import org.redisson.misc.RedissonPromise;
 
@@ -90,7 +91,8 @@ public class RedissonSet<V> extends RedissonExpirable implements RSet<V>, ScanIt
 
     @Override
     public RFuture<Boolean> containsAsync(Object o) {
-        return commandExecutor.readAsync(getName(o), codec, RedisCommands.SISMEMBER, getName(o), encode(o));
+        String name = getName(o);
+        return commandExecutor.readAsync(name, codec, RedisCommands.SISMEMBER, name, encode(o));
     }
 
     @Override
@@ -159,7 +161,8 @@ public class RedissonSet<V> extends RedissonExpirable implements RSet<V>, ScanIt
 
     @Override
     public RFuture<Boolean> addAsync(V e) {
-        return commandExecutor.writeAsync(getName(e), codec, RedisCommands.SADD_SINGLE, getName(e), encode(e));
+        String name = getName(e);
+        return commandExecutor.writeAsync(name, codec, RedisCommands.SADD_SINGLE, name, encode(e));
     }
 
     @Override
@@ -204,7 +207,8 @@ public class RedissonSet<V> extends RedissonExpirable implements RSet<V>, ScanIt
 
     @Override
     public RFuture<Boolean> removeAsync(Object o) {
-        return commandExecutor.writeAsync(getName(o), codec, RedisCommands.SREM_SINGLE, getName(o), encode(o));
+        String name = getName(o);
+        return commandExecutor.writeAsync(name, codec, RedisCommands.SREM_SINGLE, name, encode(o));
     }
 
     @Override
@@ -214,7 +218,8 @@ public class RedissonSet<V> extends RedissonExpirable implements RSet<V>, ScanIt
 
     @Override
     public RFuture<Boolean> moveAsync(String destination, V member) {
-        return commandExecutor.writeAsync(getName(member), codec, RedisCommands.SMOVE, getName(member), destination, encode(member));
+        String name = getName(member);
+        return commandExecutor.writeAsync(name, codec, RedisCommands.SMOVE, name, destination, encode(member));
     }
 
     @Override
